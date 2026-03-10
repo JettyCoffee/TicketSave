@@ -108,19 +108,9 @@ struct TicketDetailView: View {
             Divider().padding(.leading, 44)
             infoRow(icon: "timer", label: "用时", value: ticket.durationText)
             Divider().padding(.leading, 44)
-            infoRow(icon: "train.side.front.car", label: "车次", value: "\(ticket.trainNumber) (\(ticket.trainType))")
-            Divider().padding(.leading, 44)
             infoRow(icon: "carseat.right.fill", label: "座位", value: ticket.formattedSeat.isEmpty ? "未指定" : ticket.formattedSeat)
             Divider().padding(.leading, 44)
             infoRow(icon: "ticket.fill", label: "坐席", value: ticket.seatClass)
-            Divider().padding(.leading, 44)
-            infoRow(icon: "door.left.hand.open", label: "检票口", value: ticket.checkGate.isEmpty ? "未指定" : ticket.checkGate)
-            Divider().padding(.leading, 44)
-            infoRow(icon: "person.fill", label: "乘客", value: ticket.passengerName.isEmpty ? "未指定" : ticket.passengerName)
-            if !ticket.orderNumber.isEmpty {
-                Divider().padding(.leading, 44)
-                infoRow(icon: "number", label: "订单号", value: ticket.orderNumber)
-            }
         }
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -222,7 +212,6 @@ struct EditTicketView: View {
             Form {
                 Section("车次信息") {
                     TextField("车次号", text: $ticket.trainNumber)
-                    TextField("订单号", text: $ticket.orderNumber)
                 }
 
                 Section("行程") {
@@ -282,11 +271,9 @@ struct EditTicketView: View {
                             .frame(maxWidth: .infinity)
                         }
                     }
-                    TextField("检票口", text: $ticket.checkGate)
                 }
 
                 Section("其他") {
-                    TextField("乘客姓名", text: $ticket.passengerName)
                     HStack {
                         Text("¥")
                         TextField("价格", value: $ticket.price, format: .number)

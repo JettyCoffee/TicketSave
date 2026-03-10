@@ -4,3 +4,8 @@
 3。APP 还应该根据导入的车票，维护一个人生足迹，用地图可视化的展示（具体效果你自己丰富完善）
 4。其他你认为可以给这个 APP 加上的 feature 或者你觉得有什么可以完善的地方自行开发脑洞
 5。在每次修改完后需要编译一次以保证没有 bug error
+
+
+sk-0eaa23e603d04282afd25cd37ba3af0a
+
+xcodebuild -project TicketSave.xcodeproj -scheme TicketSave -destination 'generic/platform=iOS Simulator' build

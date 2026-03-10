@@ -17,14 +17,12 @@ struct AddTicketView: View {
     @State private var seatLetter = "A"
     @State private var seatClass = "二等座"
     @State private var price: Double = 0
-    @State private var checkGate = ""
     @State private var passengerName = ""
     @State private var notes = ""
 
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var selectedImage: UIImage?
     @State private var isProcessingOCR = false
-    @State private var isFetchingSchedule = false
     @State private var ocrError: String?
     @State private var showCamera = false
     @State private var showOCRResult = false
@@ -73,15 +71,6 @@ struct AddTicketView: View {
                         HStack {
                             ProgressView()
                             Text("正在识别车票信息...")
-                                .font(.system(size: 14))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    if isFetchingSchedule {
-                        HStack {
-                            ProgressView()
-                            Text("正在查询列车时刻...")
                                 .font(.system(size: 14))
                                 .foregroundStyle(.secondary)
                         }
@@ -176,7 +165,6 @@ struct AddTicketView: View {
                             .frame(maxWidth: .infinity)
                         }
                     }
-                    TextField("检票口", text: $checkGate)
                 }
 
                 // 其他
@@ -236,7 +224,6 @@ struct AddTicketView: View {
             carriageNumber: seatClass == "无座" ? "" : carriageNumber,
             seatClass: seatClass,
             price: price,
-            checkGate: checkGate,
             passengerName: passengerName,
             notes: notes
         )
@@ -254,7 +241,6 @@ struct AddTicketView: View {
             carriageNumber: seatClass == "无座" ? "" : carriageNumber,
             seatClass: seatClass,
             price: price,
-            checkGate: checkGate,
             passengerName: passengerName,
             notes: notes
         )
@@ -277,13 +263,9 @@ struct AddTicketView: View {
         isProcessingOCR = true
         ocrError = nil
         do {
-            let info = try await OCRService.recognizeTicket(from: image)
+            let info = try await DeepSeekTicketService.recognizeTicket(from: image)
             applyOCRResult(info)
             showOCRResult = true
-            // OCR 完成后，尝试通过 API 补全精确到站时间
-            if !info.trainNumber.isEmpty {
-                await fetchScheduleAndFill(from: info)
-            }
         } catch {
             ocrError = "识别失败: \(error.localizedDescription)"
         }
@@ -311,36 +293,18 @@ struct AddTicketView: View {
         }
         if !info.seatClass.isEmpty { seatClass = info.seatClass }
         if info.price > 0 { price = info.price }
-        if !info.checkGate.isEmpty { checkGate = info.checkGate }
         if !info.passengerName.isEmpty { passengerName = info.passengerName }
         if !info.orderNumber.isEmpty { orderNumber = info.orderNumber }
         if info.departureTime != Date.distantPast {
             departureTime = info.departureTime
-            arrivalTime = info.departureTime.addingTimeInterval(7200)
+            if info.arrivalTime != Date.distantPast {
+                arrivalTime = info.arrivalTime
+            } else {
+                arrivalTime = info.departureTime.addingTimeInterval(7200)
+            }
         }
     }
 
-    private func fetchScheduleAndFill(from info: TicketInfo) async {
-        guard !info.trainNumber.isEmpty,
-              !info.departureStation.isEmpty,
-              !info.arrivalStation.isEmpty,
-              info.departureTime != Date.distantPast else { return }
-        isFetchingSchedule = true
-        defer { isFetchingSchedule = false }
-        do {
-            let result = try await TrainAPIService.shared.fetchStopTimes(
-                trainNumber: info.trainNumber,
-                date: info.departureTime,
-                fromStation: info.departureStation,
-                toStation: info.arrivalStation,
-                modelContext: modelContext
-            )
-            if let dep = result.departureTime { departureTime = dep }
-            if let arr = result.arrivalTime { arrivalTime = arr }
-        } catch {
-            // API 失败不报错，保留 OCR 提取的时间（已有出发时间 + 2h 估算到站）
-        }
-    }
     // MARK: - 座位滚轮选项
     private var carriageOptions: [String] {
         (1...20).map { String(format: "%02d", $0) }
@@ -359,14 +323,14 @@ struct AddTicketView: View {
         switch seatClass {
         case "商务座", "特等座": return ["A", "C", "F"]
         case "一等座":           return ["A", "C", "D", "F"]
-        case "硬卧":             return ["上", "中", "下"]
-        case "软卧", "动卧":     return ["上", "下"]
+        case "硬卧", "二等卧": return ["上", "中", "下"]
+        case "软卧", "动卧", "一等卧":     return ["上", "下"]
         default:                 return ["A", "B", "C", "D", "F"]
         }
     }
 
     private var isSleeper: Bool {
-        ["硬卧", "软卧", "动卧"].contains(seatClass)
+        ["硬卧", "软卧", "动卧", "一等卧", "二等卧"].contains(seatClass)
     }
 }
 

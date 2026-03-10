@@ -17,6 +17,10 @@ struct ContentView: View {
             Tab("统计", systemImage: "chart.bar.fill", value: 2) {
                 StatisticsView()
             }
+
+            Tab("设置", systemImage: "gearshape.fill", value: 3) {
+                SettingsView()
+            }
         }
         .tint(.blue)
     }

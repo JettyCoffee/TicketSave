@@ -14,7 +14,6 @@ final class Ticket {
     var carriageNumber: String = ""
     var seatClass: String = "二等座"
     var price: Double = 0.0
-    var checkGate: String = ""
     var passengerName: String = ""
     @Attribute(.externalStorage) var ticketImageData: Data?
     var createdAt: Date = Date()
@@ -49,9 +48,9 @@ final class Ticket {
     var seatClassColor: Color {
         switch seatClass {
         case "商务座": return Color(red: 0.8, green: 0.6, blue: 0.2)
-        case "一等座": return Color(red: 0.55, green: 0.3, blue: 0.7)
+        case "一等座", "优选一等座", "特等座": return Color(red: 0.55, green: 0.3, blue: 0.7)
         case "二等座": return Color(red: 0.0, green: 0.45, blue: 0.85)
-        case "硬卧", "软卧": return Color(red: 0.3, green: 0.6, blue: 0.5)
+        case "硬卧", "软卧", "一等卧", "二等卧": return Color(red: 0.3, green: 0.6, blue: 0.5)
         case "硬座": return Color(red: 0.5, green: 0.5, blue: 0.5)
         case "无座": return .secondary
         default: return .blue
@@ -90,7 +89,6 @@ final class Ticket {
         carriageNumber: String = "",
         seatClass: String = "二等座",
         price: Double = 0.0,
-        checkGate: String = "",
         passengerName: String = "",
         notes: String = ""
     ) {
@@ -105,7 +103,6 @@ final class Ticket {
         self.carriageNumber = carriageNumber
         self.seatClass = seatClass
         self.price = price
-        self.checkGate = checkGate
         self.passengerName = passengerName
         self.createdAt = Date()
         self.notes = notes
@@ -117,12 +114,11 @@ struct TicketInfo: Sendable {
     var trainNumber: String = ""
     var departureStation: String = ""
     var arrivalStation: String = ""
-    var departureTime: Date = Date()
-    var arrivalTime: Date = Date()
+    var departureTime: Date = .distantPast
+    var arrivalTime: Date = .distantPast
     var seatNumber: String = ""
     var carriageNumber: String = ""
     var seatClass: String = "二等座"
     var price: Double = 0.0
-    var checkGate: String = ""
     var passengerName: String = ""
 }

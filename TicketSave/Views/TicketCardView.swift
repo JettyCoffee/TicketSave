@@ -116,13 +116,9 @@ struct TicketCardView: View {
     // MARK: - Details
     private var detailsSection: some View {
         HStack(spacing: 0) {
-            detailItem(icon: "person.fill", label: "乘客", value: ticket.passengerName.isEmpty ? "-" : ticket.passengerName)
-            Spacer()
             detailItem(icon: "carseat.right.fill", label: "座位", value: ticket.formattedSeat.isEmpty ? "-" : ticket.formattedSeat)
             Spacer()
             detailItem(icon: "ticket.fill", label: "坐席", value: ticket.seatClass)
-            Spacer()
-            detailItem(icon: "door.left.hand.open", label: "检票口", value: ticket.checkGate.isEmpty ? "-" : ticket.checkGate)
         }
     }
 
@@ -174,14 +170,16 @@ struct TicketCardView: View {
     // MARK: - Bottom
     private var bottomBar: some View {
         HStack {
-            if !ticket.orderNumber.isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "number")
-                        .font(.system(size: 10))
-                    Text(ticket.orderNumber)
+            // 左下角：坐席 + 车厢座位
+            VStack(alignment: .leading, spacing: 2) {
+                Text(ticket.seatClass)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(ticket.seatClassColor)
+                if !ticket.formattedSeat.isEmpty {
+                    Text(ticket.formattedSeat)
                         .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
                 }
-                .foregroundStyle(.tertiary)
             }
 
             Spacer()
@@ -214,7 +212,6 @@ struct TicketCardView: View {
 #Preview {
     TicketCardView(ticket: {
         let t = Ticket(
-            orderNumber: "E123456789",
             trainNumber: "G1234",
             departureStation: "北京南",
             arrivalStation: "上海虹桥",
@@ -223,9 +220,7 @@ struct TicketCardView: View {
             seatNumber: "12A",
             carriageNumber: "05",
             seatClass: "二等座",
-            price: 553.0,
-            checkGate: "B12",
-            passengerName: "张三"
+            price: 553.0
         )
         return t
     }())

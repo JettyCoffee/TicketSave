@@ -15,8 +15,7 @@ struct TicketListView: View {
                 ticket.trainNumber.localizedCaseInsensitiveContains(searchText) ||
                 ticket.departureStation.contains(searchText) ||
                 ticket.arrivalStation.contains(searchText) ||
-                ticket.passengerName.contains(searchText) ||
-                ticket.orderNumber.localizedCaseInsensitiveContains(searchText)
+                ticket.passengerName.contains(searchText)
             }
         }
         if let year = selectedYear {
