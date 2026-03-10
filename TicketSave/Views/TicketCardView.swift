@@ -118,7 +118,7 @@ struct TicketCardView: View {
         HStack(spacing: 0) {
             detailItem(icon: "person.fill", label: "乘客", value: ticket.passengerName.isEmpty ? "-" : ticket.passengerName)
             Spacer()
-            detailItem(icon: "carseat.right.fill", label: "座位", value: ticket.seatNumber.isEmpty ? "-" : ticket.seatNumber)
+            detailItem(icon: "carseat.right.fill", label: "座位", value: ticket.formattedSeat.isEmpty ? "-" : ticket.formattedSeat)
             Spacer()
             detailItem(icon: "ticket.fill", label: "坐席", value: ticket.seatClass)
             Spacer()
@@ -220,7 +220,8 @@ struct TicketCardView: View {
             arrivalStation: "上海虹桥",
             departureTime: Date(),
             arrivalTime: Date().addingTimeInterval(4.5 * 3600),
-            seatNumber: "05车12A",
+            seatNumber: "12A",
+            carriageNumber: "05",
             seatClass: "二等座",
             price: 553.0,
             checkGate: "B12",

@@ -9,31 +9,88 @@ struct StationInfo: Sendable {
     let province: String
 }
 
-struct StationDatabase: Sendable {
-    static let shared = StationDatabase()
+/// 线程安全的站点数据库。
+/// 使用内置种子数据保证首次可用，并在 StationLoader 下载 12306 最新数据后动态合并更新。
+final class StationDatabase: @unchecked Sendable {
+    nonisolated(unsafe) static let shared = StationDatabase()
 
-    private let stations: [String: StationInfo]
+    private nonisolated(unsafe) var byName: [String: StationInfo] = [:]
+    private nonisolated(unsafe) var byCode: [String: StationInfo] = [:]
+    private let lock = NSLock()
 
     private init() {
-        var map: [String: StationInfo] = [:]
-        for s in Self.stationData {
-            map[s.name] = s
+        // 先加载本地持久缓存，再用内置种子补全
+        let cached = Self.loadCache()
+        var merged: [String: StationInfo] = [:]
+        for s in Self.stationData { merged[s.name] = s }
+        for s in cached { merged[s.name] = s }
+        byName = merged
+        for info in byName.values { byCode[info.code] = info }
+    }
+
+    // MARK: - 公共同步接口（与旧 struct 完全兼容）
+    nonisolated func lookup(_ name: String) -> StationInfo? {
+        lock.withLock {
+            let cleaned = name
+                .replacingOccurrences(of: "站", with: "")
+                .replacingOccurrences(of: " ", with: "")
+            return byName[cleaned] ?? byName[name]
         }
-        self.stations = map
     }
 
-    func lookup(_ name: String) -> StationInfo? {
-        let cleaned = name.replacingOccurrences(of: "站", with: "")
-            .replacingOccurrences(of: " ", with: "")
-        return stations[cleaned] ?? stations[name]
+    nonisolated func lookupByCode(_ code: String) -> StationInfo? {
+        lock.withLock { byCode[code.uppercased()] }
     }
 
-    func coordinate(for stationName: String) -> CLLocationCoordinate2D? {
+    nonisolated func coordinate(for stationName: String) -> CLLocationCoordinate2D? {
         lookup(stationName)?.coordinate
     }
 
-    func city(for stationName: String) -> String? {
+    nonisolated func city(for stationName: String) -> String? {
         lookup(stationName)?.city
+    }
+
+    /// 前缀 / 包含模糊搜索（供 OCR 站名校验使用）
+    nonisolated func fuzzyLookup(_ prefix: String, maxResults: Int = 5) -> [StationInfo] {
+        let cleaned = prefix
+            .replacingOccurrences(of: "站", with: "")
+            .replacingOccurrences(of: " ", with: "")
+        guard cleaned.count >= 2 else { return [] }
+        return lock.withLock {
+            Array(byName.values
+                .filter { $0.name.hasPrefix(cleaned) || $0.name.contains(cleaned) }
+                .prefix(maxResults))
+        }
+    }
+
+    // MARK: - 动态合并（由 StationLoader 调用）
+    nonisolated func merge(_ stations: [StationInfo]) {
+        lock.withLock {
+            for s in stations {
+                byName[s.name] = s
+                byCode[s.code] = s
+            }
+        }
+        Self.saveCache(stations)
+    }
+
+    // MARK: - 本地持久缓存
+    private nonisolated static var cacheURL: URL {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return dir.appendingPathComponent("stations_cache_v1.json")
+    }
+
+    private nonisolated static func loadCache() -> [StationInfo] {
+        guard let data = try? Data(contentsOf: cacheURL),
+              let items = try? JSONDecoder().decode([CodableStation].self, from: data)
+        else { return [] }
+        return items.map(\.toStationInfo)
+    }
+
+    private nonisolated static func saveCache(_ stations: [StationInfo]) {
+        guard let data = try? JSONEncoder().encode(stations.map(CodableStation.init))
+        else { return }
+        try? data.write(to: cacheURL, options: .atomic)
     }
 
     private static let stationData: [StationInfo] = [
@@ -199,4 +256,21 @@ struct StationDatabase: Sendable {
         // 香港
         StationInfo(name: "香港西九龙", code: "XJA", coordinate: .init(latitude: 22.3048, longitude: 114.1617), city: "香港", province: "香港"),
     ]
+}
+
+// MARK: - JSON 序列化辅助
+private struct CodableStation: Codable, Sendable {
+    let name, code, city, province: String
+    let lat, lon: Double
+
+    nonisolated init(_ s: StationInfo) {
+        name = s.name; code = s.code; city = s.city; province = s.province
+        lat = s.coordinate.latitude; lon = s.coordinate.longitude
+    }
+
+    nonisolated var toStationInfo: StationInfo {
+        StationInfo(name: name, code: code,
+                    coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
+                    city: city, province: province)
+    }
 }

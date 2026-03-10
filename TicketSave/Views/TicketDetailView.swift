@@ -110,7 +110,7 @@ struct TicketDetailView: View {
             Divider().padding(.leading, 44)
             infoRow(icon: "train.side.front.car", label: "车次", value: "\(ticket.trainNumber) (\(ticket.trainType))")
             Divider().padding(.leading, 44)
-            infoRow(icon: "carseat.right.fill", label: "座位", value: ticket.seatNumber.isEmpty ? "未指定" : ticket.seatNumber)
+            infoRow(icon: "carseat.right.fill", label: "座位", value: ticket.formattedSeat.isEmpty ? "未指定" : ticket.formattedSeat)
             Divider().padding(.leading, 44)
             infoRow(icon: "ticket.fill", label: "坐席", value: ticket.seatClass)
             Divider().padding(.leading, 44)
@@ -200,7 +200,7 @@ struct TicketDetailView: View {
         📍 \(ticket.departureStation) → \(ticket.arrivalStation)
         📅 \(fullDateFormatter.string(from: ticket.departureTime))
         ⏰ \(timeFormatter.string(from: ticket.departureTime)) - \(timeFormatter.string(from: ticket.arrivalTime))
-        💺 \(ticket.seatClass) \(ticket.seatNumber)
+        💺 \(ticket.seatClass) \(ticket.formattedSeat)
         💰 ¥\(String(format: "%.1f", ticket.price))
         """
     }
@@ -212,6 +212,10 @@ struct EditTicketView: View {
     @Bindable var ticket: Ticket
 
     let seatClasses = ["商务座", "一等座", "二等座", "特等座", "硬卧", "软卧", "硬座", "软座", "无座"]
+
+    @State private var editCarriage = "01"
+    @State private var editSeatRow = "01"
+    @State private var editSeatLetter = "A"
 
     var body: some View {
         NavigationStack {
@@ -229,9 +233,54 @@ struct EditTicketView: View {
                 }
 
                 Section("座位") {
-                    TextField("座位号", text: $ticket.seatNumber)
                     Picker("坐席", selection: $ticket.seatClass) {
                         ForEach(seatClasses, id: \.self) { Text($0) }
+                    }
+                    .onChange(of: ticket.seatClass) { _, newClass in
+                        editSeatLetter = editLetterOptions(for: newClass).first ?? "A"
+                    }
+                    if ticket.seatClass != "无座" {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("车厢 / 排位 / 席位")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            HStack(spacing: 0) {
+                                VStack(spacing: 2) {
+                                    Text("车厢").font(.caption2).foregroundStyle(.secondary)
+                                    Picker("车厢", selection: $editCarriage) {
+                                        ForEach((1...20).map { String(format: "%02d", $0) }, id: \.self) { opt in
+                                            Text(opt + "车").tag(opt)
+                                        }
+                                    }
+                                    .pickerStyle(.wheel)
+                                    .frame(width: 90, height: 100)
+                                    .clipped()
+                                }
+                                VStack(spacing: 2) {
+                                    Text("排位").font(.caption2).foregroundStyle(.secondary)
+                                    Picker("排位", selection: $editSeatRow) {
+                                        ForEach(editRowOptions(for: ticket.seatClass), id: \.self) { opt in
+                                            Text(opt + (editIsSleeper ? "铺" : "排")).tag(opt)
+                                        }
+                                    }
+                                    .pickerStyle(.wheel)
+                                    .frame(width: 90, height: 100)
+                                    .clipped()
+                                }
+                                VStack(spacing: 2) {
+                                    Text("席位").font(.caption2).foregroundStyle(.secondary)
+                                    Picker("席位", selection: $editSeatLetter) {
+                                        ForEach(editLetterOptions(for: ticket.seatClass), id: \.self) { opt in
+                                            Text(opt).tag(opt)
+                                        }
+                                    }
+                                    .pickerStyle(.wheel)
+                                    .frame(width: 90, height: 100)
+                                    .clipped()
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
                     }
                     TextField("检票口", text: $ticket.checkGate)
                 }
@@ -254,6 +303,52 @@ struct EditTicketView: View {
                     Button("完成") { dismiss() }
                 }
             }
+            .onAppear { initEditSeatState() }
+            .onChange(of: editCarriage)    { _, v in ticket.carriageNumber = v }
+            .onChange(of: editSeatRow)     { _, _ in syncSeatNumber() }
+            .onChange(of: editSeatLetter)  { _, _ in syncSeatNumber() }
         }
+    }
+
+    // MARK: - 座位滚轮辅助
+    private func initEditSeatState() {
+        editCarriage = ticket.carriageNumber.isEmpty ? "01" : ticket.carriageNumber
+        let seat = ticket.seatNumber
+        let posChars = Set(["A","B","C","D","F","上","中","下"])
+        if let last = seat.last, posChars.contains(String(last)) {
+            editSeatLetter = String(last)
+            let rowPart = String(seat.dropLast())
+            editSeatRow = String(format: "%02d", Int(rowPart) ?? 1)
+        } else {
+            editSeatRow = "01"
+            editSeatLetter = editLetterOptions(for: ticket.seatClass).first ?? "A"
+        }
+    }
+
+    private func syncSeatNumber() {
+        ticket.seatNumber = editSeatRow + editSeatLetter
+    }
+
+    private func editRowOptions(for seatClass: String) -> [String] {
+        switch seatClass {
+        case "商务座", "特等座": return (1...9).map  { String(format: "%02d", $0) }
+        case "一等座":           return (1...18).map { String(format: "%02d", $0) }
+        case "硬卧", "软卧", "动卧": return (1...12).map { String(format: "%02d", $0) }
+        default:                 return (1...20).map { String(format: "%02d", $0) }
+        }
+    }
+
+    private func editLetterOptions(for seatClass: String) -> [String] {
+        switch seatClass {
+        case "商务座", "特等座": return ["A", "C", "F"]
+        case "一等座":           return ["A", "C", "D", "F"]
+        case "硬卧":             return ["上", "中", "下"]
+        case "软卧", "动卧":     return ["上", "下"]
+        default:                 return ["A", "B", "C", "D", "F"]
+        }
+    }
+
+    private var editIsSleeper: Bool {
+        ["硬卧", "软卧", "动卧"].contains(ticket.seatClass)
     }
 }

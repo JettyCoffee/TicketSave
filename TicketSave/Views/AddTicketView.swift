@@ -12,7 +12,9 @@ struct AddTicketView: View {
     @State private var arrivalStation = ""
     @State private var departureTime = Date()
     @State private var arrivalTime = Date().addingTimeInterval(3600)
-    @State private var seatNumber = ""
+    @State private var carriageNumber = "01"
+    @State private var seatRow = "01"
+    @State private var seatLetter = "A"
     @State private var seatClass = "二等座"
     @State private var price: Double = 0
     @State private var checkGate = ""
@@ -22,6 +24,7 @@ struct AddTicketView: View {
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var selectedImage: UIImage?
     @State private var isProcessingOCR = false
+    @State private var isFetchingSchedule = false
     @State private var ocrError: String?
     @State private var showCamera = false
     @State private var showOCRResult = false
@@ -75,6 +78,15 @@ struct AddTicketView: View {
                         }
                     }
 
+                    if isFetchingSchedule {
+                        HStack {
+                            ProgressView()
+                            Text("正在查询列车时刻...")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     if let error = ocrError {
                         HStack {
                             Image(systemName: "exclamationmark.triangle.fill")
@@ -115,9 +127,54 @@ struct AddTicketView: View {
 
                 // 座位
                 Section("座位信息") {
-                    TextField("座位号 (如 05车12A)", text: $seatNumber)
                     Picker("坐席类型", selection: $seatClass) {
                         ForEach(seatClasses, id: \.self) { Text($0) }
+                    }
+                    .onChange(of: seatClass) { _, newClass in
+                        seatLetter = seatLetterOptions(for: newClass).first ?? "A"
+                    }
+                    if seatClass != "无座" {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("车厢 / 排位 / 席位")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            HStack(spacing: 0) {
+                                VStack(spacing: 2) {
+                                    Text("车厢").font(.caption2).foregroundStyle(.secondary)
+                                    Picker("车厢", selection: $carriageNumber) {
+                                        ForEach(carriageOptions, id: \.self) { opt in
+                                            Text(opt + "车").tag(opt)
+                                        }
+                                    }
+                                    .pickerStyle(.wheel)
+                                    .frame(width: 90, height: 100)
+                                    .clipped()
+                                }
+                                VStack(spacing: 2) {
+                                    Text("排位").font(.caption2).foregroundStyle(.secondary)
+                                    Picker("排位", selection: $seatRow) {
+                                        ForEach(seatRowOptions(for: seatClass), id: \.self) { opt in
+                                            Text(opt + (isSleeper ? "铺" : "排")).tag(opt)
+                                        }
+                                    }
+                                    .pickerStyle(.wheel)
+                                    .frame(width: 90, height: 100)
+                                    .clipped()
+                                }
+                                VStack(spacing: 2) {
+                                    Text("席位").font(.caption2).foregroundStyle(.secondary)
+                                    Picker("席位", selection: $seatLetter) {
+                                        ForEach(seatLetterOptions(for: seatClass), id: \.self) { opt in
+                                            Text(opt).tag(opt)
+                                        }
+                                    }
+                                    .pickerStyle(.wheel)
+                                    .frame(width: 90, height: 100)
+                                    .clipped()
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
                     }
                     TextField("检票口", text: $checkGate)
                 }
@@ -175,7 +232,8 @@ struct AddTicketView: View {
             arrivalStation: arrivalStation,
             departureTime: departureTime,
             arrivalTime: arrivalTime,
-            seatNumber: seatNumber,
+            seatNumber: seatClass == "无座" ? "" : (seatRow + seatLetter),
+            carriageNumber: seatClass == "无座" ? "" : carriageNumber,
             seatClass: seatClass,
             price: price,
             checkGate: checkGate,
@@ -192,7 +250,8 @@ struct AddTicketView: View {
             arrivalStation: arrivalStation,
             departureTime: departureTime,
             arrivalTime: arrivalTime,
-            seatNumber: seatNumber,
+            seatNumber: seatClass == "无座" ? "" : (seatRow + seatLetter),
+            carriageNumber: seatClass == "无座" ? "" : carriageNumber,
             seatClass: seatClass,
             price: price,
             checkGate: checkGate,
@@ -221,6 +280,10 @@ struct AddTicketView: View {
             let info = try await OCRService.recognizeTicket(from: image)
             applyOCRResult(info)
             showOCRResult = true
+            // OCR 完成后，尝试通过 API 补全精确到站时间
+            if !info.trainNumber.isEmpty {
+                await fetchScheduleAndFill(from: info)
+            }
         } catch {
             ocrError = "识别失败: \(error.localizedDescription)"
         }
@@ -231,7 +294,21 @@ struct AddTicketView: View {
         if !info.trainNumber.isEmpty { trainNumber = info.trainNumber }
         if !info.departureStation.isEmpty { departureStation = info.departureStation }
         if !info.arrivalStation.isEmpty { arrivalStation = info.arrivalStation }
-        if !info.seatNumber.isEmpty { seatNumber = info.seatNumber }
+        if !info.carriageNumber.isEmpty {
+            carriageNumber = info.carriageNumber
+        }
+        if !info.seatNumber.isEmpty {
+            // 解析 "12F" → seatRow="12", seatLetter="F"；或 "5上" → seatRow="05", seatLetter="上"
+            let seat = info.seatNumber
+            let posChars = Set(["A","B","C","D","F","上","中","下"])
+            if let last = seat.last, posChars.contains(String(last)) {
+                seatLetter = String(last)
+                let rowPart = String(seat.dropLast())
+                if let rowNum = Int(rowPart) {
+                    seatRow = String(format: "%02d", rowNum)
+                }
+            }
+        }
         if !info.seatClass.isEmpty { seatClass = info.seatClass }
         if info.price > 0 { price = info.price }
         if !info.checkGate.isEmpty { checkGate = info.checkGate }
@@ -239,8 +316,57 @@ struct AddTicketView: View {
         if !info.orderNumber.isEmpty { orderNumber = info.orderNumber }
         if info.departureTime != Date.distantPast {
             departureTime = info.departureTime
-            arrivalTime = info.departureTime.addingTimeInterval(3600)
+            arrivalTime = info.departureTime.addingTimeInterval(7200)
         }
+    }
+
+    private func fetchScheduleAndFill(from info: TicketInfo) async {
+        guard !info.trainNumber.isEmpty,
+              !info.departureStation.isEmpty,
+              !info.arrivalStation.isEmpty,
+              info.departureTime != Date.distantPast else { return }
+        isFetchingSchedule = true
+        defer { isFetchingSchedule = false }
+        do {
+            let result = try await TrainAPIService.shared.fetchStopTimes(
+                trainNumber: info.trainNumber,
+                date: info.departureTime,
+                fromStation: info.departureStation,
+                toStation: info.arrivalStation,
+                modelContext: modelContext
+            )
+            if let dep = result.departureTime { departureTime = dep }
+            if let arr = result.arrivalTime { arrivalTime = arr }
+        } catch {
+            // API 失败不报错，保留 OCR 提取的时间（已有出发时间 + 2h 估算到站）
+        }
+    }
+    // MARK: - 座位滚轮选项
+    private var carriageOptions: [String] {
+        (1...20).map { String(format: "%02d", $0) }
+    }
+
+    private func seatRowOptions(for seatClass: String) -> [String] {
+        switch seatClass {
+        case "商务座", "特等座": return (1...9).map  { String(format: "%02d", $0) }
+        case "一等座":           return (1...18).map { String(format: "%02d", $0) }
+        case "硬卧", "软卧", "动卧": return (1...12).map { String(format: "%02d", $0) }
+        default:                 return (1...20).map { String(format: "%02d", $0) }
+        }
+    }
+
+    private func seatLetterOptions(for seatClass: String) -> [String] {
+        switch seatClass {
+        case "商务座", "特等座": return ["A", "C", "F"]
+        case "一等座":           return ["A", "C", "D", "F"]
+        case "硬卧":             return ["上", "中", "下"]
+        case "软卧", "动卧":     return ["上", "下"]
+        default:                 return ["A", "B", "C", "D", "F"]
+        }
+    }
+
+    private var isSleeper: Bool {
+        ["硬卧", "软卧", "动卧"].contains(seatClass)
     }
 }
 
