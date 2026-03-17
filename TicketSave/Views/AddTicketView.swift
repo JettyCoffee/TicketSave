@@ -16,9 +16,13 @@ struct AddTicketView: View {
     @State private var seatRow = "01"
     @State private var seatLetter = "A"
     @State private var seatClass = "二等座"
+    @State private var ticketType = ""
     @State private var price: Double = 0
     @State private var passengerName = ""
     @State private var notes = ""
+    @State private var scheduleTrainDate = ""
+    @State private var scheduleSourceURL = ""
+    @State private var scheduleStopCount = 0
 
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var selectedImage: UIImage?
@@ -169,6 +173,7 @@ struct AddTicketView: View {
 
                 // 其他
                 Section("其他信息") {
+                    TextField("票种 (如 学生票/报销票)", text: $ticketType)
                     TextField("乘客姓名", text: $passengerName)
                     HStack {
                         Text("¥")
@@ -184,6 +189,18 @@ struct AddTicketView: View {
                     Section("预览") {
                         TicketCardView(ticket: previewTicket, compact: true)
                             .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                    }
+                }
+
+                if scheduleStopCount > 0 {
+                    Section("时刻表") {
+                        Text("已缓存经停站点: \(scheduleStopCount) 站")
+                            .font(.system(size: 14))
+                        if !scheduleTrainDate.isEmpty {
+                            Text("对应日期: \(scheduleTrainDate)")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -223,8 +240,12 @@ struct AddTicketView: View {
             seatNumber: seatClass == "无座" ? "" : (seatRow + seatLetter),
             carriageNumber: seatClass == "无座" ? "" : carriageNumber,
             seatClass: seatClass,
+            ticketType: ticketType,
             price: price,
             passengerName: passengerName,
+            scheduleTrainDate: scheduleTrainDate,
+            scheduleSourceURL: scheduleSourceURL,
+            scheduleStopCount: scheduleStopCount,
             notes: notes
         )
     }
@@ -240,8 +261,12 @@ struct AddTicketView: View {
             seatNumber: seatClass == "无座" ? "" : (seatRow + seatLetter),
             carriageNumber: seatClass == "无座" ? "" : carriageNumber,
             seatClass: seatClass,
+            ticketType: ticketType,
             price: price,
             passengerName: passengerName,
+            scheduleTrainDate: scheduleTrainDate,
+            scheduleSourceURL: scheduleSourceURL,
+            scheduleStopCount: scheduleStopCount,
             notes: notes
         )
         if let image = selectedImage, let data = image.jpegData(compressionQuality: 0.7) {
@@ -263,7 +288,7 @@ struct AddTicketView: View {
         isProcessingOCR = true
         ocrError = nil
         do {
-            let info = try await DeepSeekTicketService.recognizeTicket(from: image)
+            let info = try await TicketOCRUseCase().recognizeTicket(from: image, modelContext: modelContext)
             applyOCRResult(info)
             showOCRResult = true
         } catch {
@@ -272,7 +297,7 @@ struct AddTicketView: View {
         isProcessingOCR = false
     }
 
-    private func applyOCRResult(_ info: TicketInfo) {
+    private func applyOCRResult(_ info: AddTicketOCRResult) {
         if !info.trainNumber.isEmpty { trainNumber = info.trainNumber }
         if !info.departureStation.isEmpty { departureStation = info.departureStation }
         if !info.arrivalStation.isEmpty { arrivalStation = info.arrivalStation }
@@ -291,16 +316,43 @@ struct AddTicketView: View {
                 }
             }
         }
+        if info.carriageNumber.isEmpty && !info.carriageAndSeat.isEmpty {
+            let normalized = info.carriageAndSeat.replacingOccurrences(of: "号", with: "")
+            if let match = normalized.range(of: #"(\d{1,2})车(\d{1,3}[A-Za-z上下中])"#, options: .regularExpression) {
+                let piece = String(normalized[match])
+                let parts = piece.components(separatedBy: "车")
+                if parts.count == 2 {
+                    carriageNumber = String(format: "%02d", Int(parts[0]) ?? 1)
+                    let seat = parts[1].uppercased()
+                    let letter = String(seat.suffix(1))
+                    if let rowNum = Int(String(seat.dropLast())) {
+                        seatRow = String(format: "%02d", rowNum)
+                    }
+                    seatLetter = letter
+                }
+            }
+        }
         if !info.seatClass.isEmpty { seatClass = info.seatClass }
+        if !info.ticketType.isEmpty { ticketType = info.ticketType }
         if info.price > 0 { price = info.price }
-        if !info.passengerName.isEmpty { passengerName = info.passengerName }
-        if !info.orderNumber.isEmpty { orderNumber = info.orderNumber }
         if info.departureTime != Date.distantPast {
             departureTime = info.departureTime
-            if info.arrivalTime != Date.distantPast {
-                arrivalTime = info.arrivalTime
-            } else {
-                arrivalTime = info.departureTime.addingTimeInterval(7200)
+        }
+        if info.arrivalTime != Date.distantPast {
+            arrivalTime = info.arrivalTime
+        } else if info.departureTime != Date.distantPast {
+            arrivalTime = info.departureTime.addingTimeInterval(7200)
+        }
+        scheduleTrainDate = info.schedule.trainDate
+        scheduleSourceURL = info.schedule.sourceURL
+        scheduleStopCount = info.schedule.stops.count
+
+        if !info.schedule.stops.isEmpty {
+            let summary = "时刻表来源: \(info.schedule.sourceURL)"
+            if notes.isEmpty {
+                notes = summary
+            } else if !notes.contains(summary) {
+                notes += "\n" + summary
             }
         }
     }

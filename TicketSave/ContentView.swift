@@ -10,15 +10,7 @@ struct ContentView: View {
                 TicketListView()
             }
 
-            Tab("足迹", systemImage: "map.fill", value: 1) {
-                JourneyMapView()
-            }
-
-            Tab("统计", systemImage: "chart.bar.fill", value: 2) {
-                StatisticsView()
-            }
-
-            Tab("设置", systemImage: "gearshape.fill", value: 3) {
+            Tab("我的", systemImage: "gearshape.fill", value: 3) {
                 SettingsView()
             }
         }

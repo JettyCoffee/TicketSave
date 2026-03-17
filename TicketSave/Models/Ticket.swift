@@ -13,8 +13,12 @@ final class Ticket {
     var seatNumber: String = ""
     var carriageNumber: String = ""
     var seatClass: String = "二等座"
+    var ticketType: String = ""
     var price: Double = 0.0
     var passengerName: String = ""
+    var scheduleTrainDate: String = ""
+    var scheduleSourceURL: String = ""
+    var scheduleStopCount: Int = 0
     @Attribute(.externalStorage) var ticketImageData: Data?
     var createdAt: Date = Date()
     var notes: String = ""
@@ -88,8 +92,12 @@ final class Ticket {
         seatNumber: String = "",
         carriageNumber: String = "",
         seatClass: String = "二等座",
+        ticketType: String = "",
         price: Double = 0.0,
         passengerName: String = "",
+        scheduleTrainDate: String = "",
+        scheduleSourceURL: String = "",
+        scheduleStopCount: Int = 0,
         notes: String = ""
     ) {
         self.id = UUID()
@@ -102,8 +110,12 @@ final class Ticket {
         self.seatNumber = seatNumber
         self.carriageNumber = carriageNumber
         self.seatClass = seatClass
+        self.ticketType = ticketType
         self.price = price
         self.passengerName = passengerName
+        self.scheduleTrainDate = scheduleTrainDate
+        self.scheduleSourceURL = scheduleSourceURL
+        self.scheduleStopCount = scheduleStopCount
         self.createdAt = Date()
         self.notes = notes
     }
@@ -119,6 +131,10 @@ struct TicketInfo: Sendable {
     var seatNumber: String = ""
     var carriageNumber: String = ""
     var seatClass: String = "二等座"
+    var ticketType: String = ""
     var price: Double = 0.0
     var passengerName: String = ""
+    var scheduleTrainDate: String = ""
+    var scheduleSourceURL: String = ""
+    var scheduleStops: [StopInfo] = []
 }

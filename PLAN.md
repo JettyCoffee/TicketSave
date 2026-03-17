@@ -9,3 +9,5 @@
 sk-0eaa23e603d04282afd25cd37ba3af0a
 
 xcodebuild -project TicketSave.xcodeproj -scheme TicketSave -destination 'generic/platform=iOS Simulator' build
+
+/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project TicketSave.xcodeproj -scheme TicketSave -destination 'generic/platform=iOS Simulator' build

@@ -1,2 +1,5 @@
 座位需要被拆分为车厢和座位两个信息，这俩个信息最好是有一个滚轮能选择而不是填充框，滚轮的信息根据坐席类型而定
 车站的识别可能会识别到“车站“字样，这个不是车站信息，OCR 需要剔除，准确来说是需要 OCR 内容和本地的车站数据做模糊匹配
+
+
+[text](<../../Library/Group Containers/group.com.apple.coreservices.useractivityd/shared-pasteboard/items/EA58CEA5-50F1-4F11-A727-20621F9E9424/42cfd85da39535f4f92b31c39ab688aa876042e9.rtfd>)

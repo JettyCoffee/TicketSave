@@ -1,0 +1,92 @@
+{
+	"schema": "ticketsave.ticket.standard.v1",
+	"schemaVersion": "1.0.0",
+	"createdAt": "2026-03-18T00:00:00Z",
+	"updatedAt": "2026-03-18T00:00:00Z",
+	"tickets": [
+		{
+			"id": "",
+			"source": {
+				"provider": "vision-local",
+				"imageName": "",
+				"imageHash": "",
+				"ocrEngine": "AppleVision",
+				"ocrVersion": "1.0.0"
+			},
+			"journey": {
+				"trainNumber": "",
+				"departureStation": "",
+				"arrivalStation": "",
+				"departureTime": "",
+				"arrivalTime": "",
+				"departureDate": "",
+				"departureDateTime": "",
+				"arrivalDateTime": ""
+			},
+			"seat": {
+				"carriageNumber": "",
+				"seatNumber": "",
+				"carriageAndSeat": "",
+				"seatClass": ""
+			},
+			"fare": {
+				"currency": "CNY",
+				"amount": null,
+				"displayPrice": ""
+			},
+			"ticket": {
+				"ticketType": "",
+				"isReimbursementOnly": null,
+				"checkGate": ""
+			},
+			"passenger": {
+				"name": "",
+				"idMasked": ""
+			},
+			"quality": {
+				"parseConfidence": null,
+				"missingFields": []
+			},
+			"schedule": {
+				"enabled": true,
+				"source": "https://shike.gaotie.cn/checi.asp?checi=G500",
+				"trainDate": "",
+				"stops": [
+					{
+						"stationNo": "01",
+						"stationName": "",
+						"arriveTime": null,
+						"startTime": "",
+						"stopMinutes": 0,
+						"arriveDayDiff": 0
+					}
+				]
+			},
+			"raw": {
+				"ocrLines": [],
+				"rawText": ""
+			},
+			"extensions": {}
+		}
+	],
+	"fieldRules": {
+		"departureDateTime": "ISO8601 local datetime, e.g. 2025-09-13T15:50:00+08:00",
+		"arrivalDateTime": "ISO8601 local datetime, e.g. 2025-09-13T19:30:00+08:00",
+		"departureDate": "YYYY-MM-DD",
+		"departureTime": "HH:mm",
+		"arrivalTime": "HH:mm",
+		"amount": "number, unit CNY yuan",
+		"seatClassEnum": [
+			"商务座",
+			"特等座",
+			"一等座",
+			"二等座",
+			"无座",
+			"高级软卧",
+			"软卧",
+			"硬卧",
+			"软座",
+			"硬座"
+		]
+	}
+}
