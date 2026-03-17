@@ -29,22 +29,23 @@ final class VisionTicketOCRService {
 
         let lines = deduplicate(lines: merged)
         let rawTexts = lines.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let effectiveTexts = truncateAfterReimbursementSection(rawTexts)
         var result = OCRTicketExtraction()
-        result.rawLines = rawTexts
+        result.rawLines = effectiveTexts
 
-        let parsedRoute = parseTrainAndStations(from: rawTexts)
+        let parsedRoute = parseTrainAndStations(from: effectiveTexts)
         result.trainNumber = parsedRoute.train
         result.departureStation = parsedRoute.departure
         result.arrivalStation = parsedRoute.arrival
-        result.departureTime = parseDepartureTime(from: rawTexts)
+        result.departureTime = parseDepartureTime(from: effectiveTexts)
 
-        let seat = parseCarriageAndSeat(from: rawTexts)
+        let seat = parseCarriageAndSeat(from: effectiveTexts)
         result.carriageAndSeat = seat.display
         result.carriageNumber = seat.carriage
         result.seatNumber = seat.seat
-        result.price = parsePrice(from: rawTexts)
-        result.ticketType = parseTicketType(from: rawTexts)
-        result.seatClass = parseSeatClass(from: rawTexts)
+        result.price = parsePrice(from: effectiveTexts)
+        result.ticketType = parseTicketType(from: effectiveTexts)
+        result.seatClass = parseSeatClass(from: effectiveTexts)
 
         return result
     }
@@ -143,6 +144,33 @@ final class VisionTicketOCRService {
         let range = NSRange(location: 0, length: ns.length)
         guard let match = regex.firstMatch(in: value, options: [], range: range) else { return nil }
         return ns.substring(with: match.range)
+    }
+
+    private func isMaskedPassengerLine(_ line: String) -> Bool {
+        let text = normalized(line)
+        let digitCount = text.filter { $0.isNumber }.count
+        let maskCount = text.filter { $0 == "*" || $0 == "#" || $0 == "x" || $0 == "X" }.count
+        let hasChineseNameTail = text.range(of: #"[\u4e00-\u9fa5]{2,5}$"#, options: .regularExpression) != nil
+        return digitCount >= 10 && maskCount >= 2 && hasChineseNameTail
+    }
+
+    private func truncateAfterReimbursementSection(_ lines: [String]) -> [String] {
+        guard let markerIndex = lines.firstIndex(where: { normalized($0).contains("仅供报销使用") }) else {
+            return lines
+        }
+
+        var cutIndex = markerIndex
+        let searchEnd = min(lines.count - 1, markerIndex + 4)
+        if markerIndex < searchEnd {
+            for i in (markerIndex + 1)...searchEnd {
+                if isMaskedPassengerLine(lines[i]) {
+                    cutIndex = i
+                    break
+                }
+            }
+        }
+
+        return Array(lines.prefix(cutIndex + 1))
     }
 
     private func parseDepartureTime(from lines: [String]) -> Date {

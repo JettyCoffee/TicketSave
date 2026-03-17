@@ -27,6 +27,7 @@ struct AddTicketView: View {
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var selectedImage: UIImage?
     @State private var isProcessingOCR = false
+    @State private var ocrFinished = false
     @State private var ocrError: String?
     @State private var showCamera = false
     @State private var showOCRResult = false
@@ -212,7 +213,7 @@ struct AddTicketView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { saveTicket() }
-                        .disabled(trainNumber.isEmpty || departureStation.isEmpty || arrivalStation.isEmpty)
+                        .disabled(!ocrFinished || trainNumber.isEmpty || departureStation.isEmpty || arrivalStation.isEmpty)
                         .fontWeight(.semibold)
                 }
             }
@@ -281,18 +282,22 @@ struct AddTicketView: View {
         guard let data = try? await item.loadTransferable(type: Data.self),
               let image = UIImage(data: data) else { return }
         selectedImage = image
+        ocrFinished = false
         await processOCR(image: image)
     }
 
     private func processOCR(image: UIImage) async {
         isProcessingOCR = true
+        ocrFinished = false
         ocrError = nil
         do {
             let info = try await TicketOCRUseCase().recognizeTicket(from: image, modelContext: modelContext)
             applyOCRResult(info)
             showOCRResult = true
+            ocrFinished = true
         } catch {
             ocrError = "识别失败: \(error.localizedDescription)"
+            ocrFinished = false
         }
         isProcessingOCR = false
     }

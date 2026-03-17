@@ -118,6 +118,33 @@ func firstMatch(_ pattern: String, in text: String) -> String? {
     return ns.substring(with: m.range)
 }
 
+func isMaskedPassengerLine(_ line: String) -> Bool {
+    let text = normalize(line)
+    let digitCount = text.filter { $0.isNumber }.count
+    let maskCount = text.filter { $0 == "*" || $0 == "#" || $0 == "x" || $0 == "X" }.count
+    let hasChineseNameTail = text.range(of: #"[\u4e00-\u9fa5]{2,5}$"#, options: .regularExpression) != nil
+    return digitCount >= 10 && maskCount >= 2 && hasChineseNameTail
+}
+
+func truncateAfterReimbursementSection(_ lines: [String]) -> [String] {
+    guard let markerIndex = lines.firstIndex(where: { normalize($0).contains("仅供报销使用") }) else {
+        return lines
+    }
+
+    var cutIndex = markerIndex
+    let searchEnd = min(lines.count - 1, markerIndex + 4)
+    if markerIndex < searchEnd {
+        for i in (markerIndex + 1)...searchEnd {
+            if isMaskedPassengerLine(lines[i]) {
+                cutIndex = i
+                break
+            }
+        }
+    }
+
+    return Array(lines.prefix(cutIndex + 1))
+}
+
 func parseDepartureTime(from lines: [String]) -> String? {
     let pattern = #"(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日\s*(\d{1,2}):(\d{2})"#
     guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
@@ -268,7 +295,8 @@ func recognizeTicket(at imagePath: String) throws -> TicketFields {
     }
 
     let lines = deduplicate(lines: merged)
-    let texts = lines.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    let rawTexts = lines.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    let texts = truncateAfterReimbursementSection(rawTexts)
 
     let (train, dep, arr) = parseTrainAndStations(from: texts)
 
