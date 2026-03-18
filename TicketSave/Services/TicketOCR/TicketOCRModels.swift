@@ -33,3 +33,16 @@ struct AddTicketOCRResult: Sendable {
     var schedule: TicketScheduleSnapshot = .init()
     var rawLines: [String] = []
 }
+
+enum AddTicketOCRStage: Sendable {
+    case preparing
+    case ocrCompleted
+    case scheduleCompleted
+    case finished
+}
+
+struct AddTicketOCRProgress: Sendable {
+    var stage: AddTicketOCRStage
+    var message: String
+    var snapshot: AddTicketOCRResult
+}
