@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import PhotosUI
 import UIKit
+import Vision
 
 struct AddTicketView: View {
     @Environment(\.dismiss) private var dismiss
@@ -11,6 +12,8 @@ struct AddTicketView: View {
 
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var selectedImage: UIImage?
+    @State private var originalImage: UIImage?
+    @State private var detectedTicketRect: CGRect?
 
     @State private var isRecognizing = false
     @State private var progressMessage = "等待上传图片"
@@ -49,7 +52,6 @@ struct AddTicketView: View {
                 basicSection
                 timeSection
                 seatSection
-                otherSection
                 rawTextSection
             }
             .navigationTitle("添加车票")
@@ -113,12 +115,30 @@ struct AddTicketView: View {
 
     private var imageSection: some View {
         Section("车票图片") {
+            if let originalImage {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("原图")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Image(uiImage: originalImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 150)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            }
+
             if let image = selectedImage {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("车票框选结果（将用于 OCR 与保存）")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
                     .frame(maxHeight: 220)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
             } else {
                 ContentUnavailableView {
                     Label("尚未选择图片", systemImage: "photo")
@@ -190,13 +210,11 @@ struct AddTicketView: View {
 
     private var basicSection: some View {
         Section("基础信息") {
-            TextField("订单号", text: $orderNumber)
             TextField("车次", text: $trainNumber)
                 .textInputAutocapitalization(.characters)
             TextField("出发站", text: $departureStation)
             TextField("到达站", text: $arrivalStation)
             TextField("票种", text: $ticketType)
-            TextField("乘车人", text: $passengerName)
             HStack {
                 Text("票价")
                 Spacer()
@@ -268,13 +286,6 @@ struct AddTicketView: View {
         }
     }
 
-    private var otherSection: some View {
-        Section("备注") {
-            TextField("备注", text: $notes, axis: .vertical)
-                .lineLimit(2...5)
-        }
-    }
-
     private var rawTextSection: some View {
         Section("OCR 原始文本") {
             if rawLines.isEmpty {
@@ -307,6 +318,8 @@ struct AddTicketView: View {
     private func loadSelectedPhoto(item: PhotosPickerItem?) async {
         guard let item else {
             selectedImage = nil
+            originalImage = nil
+            detectedTicketRect = nil
             return
         }
 
@@ -318,12 +331,101 @@ struct AddTicketView: View {
                 return
             }
 
-            selectedImage = image
-            progressMessage = "图片已就绪，点击开始识别"
+            await MainActor.run {
+                originalImage = image
+                progressMessage = "正在自动框选车票"
+            }
+
+            await autoDetectAndPrepareTicketImage(from: image)
         } catch {
             errorMessage = error.localizedDescription
             showError = true
         }
+    }
+
+    private func autoDetectAndPrepareTicketImage(from image: UIImage) async {
+        let rect = await detectTicketRect(in: image)
+        await MainActor.run {
+            detectedTicketRect = rect
+            refreshSelectedImageFromCrop()
+            if rect == nil {
+                progressMessage = "未检测到车票边界，已使用整图（可直接识别）"
+            } else {
+                progressMessage = "已自动框选车票，可直接识别"
+            }
+        }
+    }
+
+    private func refreshSelectedImageFromCrop() {
+        guard let base = originalImage else {
+            selectedImage = nil
+            return
+        }
+
+        let ticketRect = detectedTicketRect ?? CGRect(x: 0, y: 0, width: 1, height: 1)
+        if let cropped = crop(image: base, normalizedRect: ticketRect) {
+            selectedImage = normalizeToLandscape(cropped)
+        } else {
+            selectedImage = normalizeToLandscape(base)
+        }
+    }
+
+    private func detectTicketRect(in image: UIImage) async -> CGRect? {
+        guard let cgImage = image.cgImage else { return nil }
+
+        return await withCheckedContinuation { continuation in
+            let request = VNDetectRectanglesRequest { req, _ in
+                let observations = req.results as? [VNRectangleObservation] ?? []
+
+                let best = observations
+                    .filter { $0.boundingBox.width > 0.35 && $0.boundingBox.height > 0.12 }
+                    .max { lhs, rhs in
+                        (lhs.boundingBox.width * lhs.boundingBox.height)
+                        < (rhs.boundingBox.width * rhs.boundingBox.height)
+                    }
+
+                continuation.resume(returning: best?.boundingBox)
+            }
+
+            request.maximumObservations = 6
+            request.minimumConfidence = 0.3
+            request.minimumSize = 0.15
+            request.minimumAspectRatio = 1.2
+            request.quadratureTolerance = 25
+
+            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+            do {
+                try handler.perform([request])
+            } catch {
+                continuation.resume(returning: nil)
+            }
+        }
+    }
+
+    private func crop(image: UIImage, normalizedRect: CGRect) -> UIImage? {
+        guard let cgImage = image.cgImage else { return nil }
+
+        let width = CGFloat(cgImage.width)
+        let height = CGFloat(cgImage.height)
+
+        // Vision boundingBox 原点在左下，CoreGraphics 裁剪原点在左上，需要翻转 Y。
+        let x = normalizedRect.minX * width
+        let y = (1.0 - normalizedRect.maxY) * height
+        let w = normalizedRect.width * width
+        let h = normalizedRect.height * height
+
+        let pixelRect = CGRect(x: x, y: y, width: w, height: h).integral
+        guard let cropped = cgImage.cropping(to: pixelRect) else { return nil }
+
+        return UIImage(cgImage: cropped)
+    }
+
+    private func normalizeToLandscape(_ image: UIImage) -> UIImage {
+        let normalized = image.normalizedImage()
+        guard normalized.size.height > normalized.size.width else {
+            return normalized
+        }
+        return normalized.rotatedClockwise90()
     }
 
     private func runOCR() async {
@@ -490,6 +592,29 @@ struct AddTicketView: View {
         } catch {
             errorMessage = "保存失败：\(error.localizedDescription)"
             showError = true
+        }
+    }
+}
+
+private extension UIImage {
+    func normalizedImage() -> UIImage {
+        if imageOrientation == .up { return self }
+
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { _ in
+            draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+
+    func rotatedClockwise90() -> UIImage {
+        let targetSize = CGSize(width: size.height, height: size.width)
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+
+        return renderer.image { context in
+            let cg = context.cgContext
+            cg.translateBy(x: targetSize.width / 2, y: targetSize.height / 2)
+            cg.rotate(by: .pi / 2)
+            draw(in: CGRect(x: -size.width / 2, y: -size.height / 2, width: size.width, height: size.height))
         }
     }
 }

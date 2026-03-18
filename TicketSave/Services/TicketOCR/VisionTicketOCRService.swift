@@ -29,17 +29,9 @@ final class VisionTicketOCRService {
         }
 
         let lines = deduplicate(lines: merged)
-        
-        let sortedLines = lines.sorted { line1, line2 in
-            let yDiff = abs(line1.box.midY - line2.box.midY)
-            let avgHeight = (line1.box.height + line2.box.height) / 2.0
-            if yDiff < avgHeight * 0.6 {
-                return line1.box.minX < line2.box.minX
-            }
-            return line1.box.midY > line2.box.midY
-        }
-        
-        let rawTexts = sortedLines.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let orderedLines = orderByReadingDirection(lines)
+        let rawTexts = orderedLines.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
         let rawText = rawTexts.joined(separator: " ")
         
         var cutoutText = rawText
@@ -124,5 +116,53 @@ final class VisionTicketOCRService {
             }
         }
         return Array(best.values)
+    }
+
+    private func orderByReadingDirection(_ lines: [OCRLine]) -> [OCRLine] {
+        guard !lines.isEmpty else { return [] }
+
+        struct OCRRow {
+            var referenceY: CGFloat
+            var height: CGFloat
+            var lines: [OCRLine]
+        }
+
+        // Vision 的 normalized 坐标原点在左下，Y 越大越靠上。
+        let ySorted = lines.sorted { lhs, rhs in
+            if abs(lhs.box.midY - rhs.box.midY) < 0.0001 {
+                return lhs.box.minX < rhs.box.minX
+            }
+            return lhs.box.midY > rhs.box.midY
+        }
+
+        var rows: [OCRRow] = []
+        for line in ySorted {
+            if let last = rows.last {
+                let yDelta = abs(last.referenceY - line.box.midY)
+                let tolerance = max(0.015, max(last.height, line.box.height) * 0.7)
+                if yDelta <= tolerance {
+                    var merged = last
+                    merged.lines.append(line)
+                    let count = CGFloat(merged.lines.count)
+                    merged.referenceY = ((last.referenceY * (count - 1.0)) + line.box.midY) / count
+                    merged.height = max(last.height, line.box.height)
+                    rows[rows.count - 1] = merged
+                    continue
+                }
+            }
+
+            rows.append(OCRRow(referenceY: line.box.midY, height: line.box.height, lines: [line]))
+        }
+
+        return rows
+            .sorted { $0.referenceY > $1.referenceY }
+            .flatMap { row in
+                row.lines.sorted { lhs, rhs in
+                    if abs(lhs.box.minX - rhs.box.minX) < 0.0001 {
+                        return lhs.box.midY > rhs.box.midY
+                    }
+                    return lhs.box.minX < rhs.box.minX
+                }
+            }
     }
 }
