@@ -13,7 +13,7 @@ struct TicketListView: View {
                     ContentUnavailableView {
                         Label("暂无车票", systemImage: "ticket")
                     } description: {
-                        Text("点击右上角添加，使用 OCR 自动识别车票")
+                        Text("点击右上角添加车票")
                     }
                 } else {
                     List {

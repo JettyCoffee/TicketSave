@@ -27,7 +27,8 @@ final class TicketOCRUseCase {
         result.carriageNumber = extraction.carriageNumber
         result.seatNumber = extraction.seatNumber
         result.price = extraction.price
-        result.ticketType = extraction.ticketType
+        let normalizedTicketType = extraction.ticketType.trimmingCharacters(in: .whitespacesAndNewlines)
+        result.ticketType = normalizedTicketType.isEmpty ? "成人票" : normalizedTicketType
         result.seatClass = extraction.seatClass
         result.rawLines = extraction.rawLines
 

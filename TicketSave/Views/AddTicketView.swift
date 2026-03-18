@@ -5,6 +5,12 @@ import UIKit
 import Vision
 
 struct AddTicketView: View {
+    private enum AddTicketStep: Int, CaseIterable {
+        case source
+        case processing
+        case review
+    }
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
@@ -14,6 +20,10 @@ struct AddTicketView: View {
     @State private var selectedImage: UIImage?
     @State private var originalImage: UIImage?
     @State private var detectedTicketRect: CGRect?
+    @State private var showCameraPicker = false
+
+    @State private var currentStep: AddTicketStep = .source
+    @State private var processingAnimating = false
 
     @State private var isRecognizing = false
     @State private var progressMessage = "等待上传图片"
@@ -46,13 +56,28 @@ struct AddTicketView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                imageSection
-                progressSection
-                basicSection
-                timeSection
-                seatSection
-                rawTextSection
+            ZStack {
+                LinearGradient(
+                    colors: [Color(red: 0.95, green: 0.98, blue: 1.0), Color(red: 0.98, green: 0.97, blue: 0.94)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+
+                Group {
+                    switch currentStep {
+                    case .source:
+                        sourceStepView
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                    case .processing:
+                        processingStepView
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    case .review:
+                        reviewStepView
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                }
+                .animation(.spring(response: 0.45, dampingFraction: 0.9), value: currentStep)
             }
             .navigationTitle("添加车票")
             .navigationBarTitleDisplayMode(.inline)
@@ -65,16 +90,26 @@ struct AddTicketView: View {
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("保存") {
-                        saveTicket()
+                    if currentStep == .review {
+                        Button("保存") {
+                            saveTicket()
+                        }
+                        .disabled(!canSave || isRecognizing)
                     }
-                    .disabled(!canSave || isRecognizing)
                 }
             }
             .alert("识别失败", isPresented: $showError) {
                 Button("知道了", role: .cancel) { }
             } message: {
                 Text(errorMessage)
+            }
+            .sheet(isPresented: $showCameraPicker) {
+                CameraImagePicker { image in
+                    Task {
+                        await loadCapturedImage(image)
+                    }
+                }
+                .ignoresSafeArea()
             }
             .onChange(of: selectedPhotoItem) { _, newItem in
                 Task {
@@ -113,59 +148,161 @@ struct AddTicketView: View {
         }
     }
 
-    private var imageSection: some View {
-        Section("车票图片") {
-            if let originalImage {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("原图")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Image(uiImage: originalImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxHeight: 150)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+    private var sourceStepView: some View {
+        Form {
+            Section("选择图片") {
+                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                    Label("从相册选择", systemImage: "photo.on.rectangle")
                 }
-            }
 
-            if let image = selectedImage {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("车票框选结果（将用于 OCR 与保存）")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxHeight: 220)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                Button {
+                    showCameraPicker = true
+                } label: {
+                    Label("拍照上传", systemImage: "camera")
                 }
-            } else {
-                ContentUnavailableView {
-                    Label("尚未选择图片", systemImage: "photo")
-                } description: {
-                    Text("选择一张车票图片后可自动识别")
-                }
-            }
 
-            PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                Label("从相册选择", systemImage: "photo.on.rectangle")
-            }
-
-            Button {
-                Task {
-                    await runOCR()
-                }
-            } label: {
-                if isRecognizing {
-                    HStack {
-                        ProgressView()
-                        Text("识别中")
+                if let image = selectedImage {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("自动纠正结果")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 220)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .stroke(Color.white.opacity(0.75), lineWidth: 1)
+                            )
+                            .shadow(color: .black.opacity(0.08), radius: 12, x: 0, y: 6)
                     }
                 } else {
+                    ContentUnavailableView {
+                        Label("尚未选择图片", systemImage: "photo")
+                    } description: {
+                        Text("先选择相册图片或直接拍照")
+                    }
+                }
+
+                Button {
+                    beginRecognition()
+                } label: {
                     Label("开始识别", systemImage: "sparkles.rectangle.stack")
                 }
+                .disabled(selectedImage == nil || isRecognizing)
             }
-            .disabled(selectedImage == nil || isRecognizing)
+        }
+    }
+
+    private var processingStepView: some View {
+        VStack(spacing: 18) {
+            ZStack {
+                Circle()
+                    .stroke(Color.accentColor.opacity(0.2), lineWidth: 10)
+                    .frame(width: 88, height: 88)
+
+                Circle()
+                    .trim(from: 0.1, to: 0.8)
+                    .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                    .frame(width: 88, height: 88)
+                    .rotationEffect(.degrees(processingAnimating ? 360 : 0))
+                    .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: processingAnimating)
+
+                Image(systemName: "server.rack")
+                    .font(.title2)
+                    .foregroundStyle(.blue)
+            }
+            .padding(.top, 20)
+
+            Text(progressMessage)
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("后端处理流程")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("状态")
+                            Spacer()
+                            Text(progressMessage)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if !progressEvents.isEmpty {
+                            ForEach(progressEvents.indices, id: \.self) { index in
+                                let event = progressEvents[index]
+                                HStack(alignment: .top, spacing: 10) {
+                                    Image(systemName: icon(for: event.stage))
+                                        .foregroundStyle(color(for: event.stage))
+                                        .frame(width: 18)
+                                    Text(event.message)
+                                        .font(.footnote)
+                                }
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                            }
+                        } else {
+                            Text("正在提交并处理 OCR，请稍候...")
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if !scheduleSourceURL.isEmpty {
+                            HStack {
+                                Text("时刻表站点")
+                                Spacer()
+                                Text("\(scheduleStopCount) 站")
+                                    .foregroundStyle(.secondary)
+                            }
+                            HStack {
+                                Text("时刻表日期")
+                                Spacer()
+                                Text(scheduleTrainDate)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                }
+                .frame(maxHeight: 260)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+            }
+            .padding(.horizontal)
+
+            Spacer()
+        }
+        .padding(.horizontal)
+        .onAppear {
+            processingAnimating = true
+        }
+        .onDisappear {
+            processingAnimating = false
+        }
+    }
+
+    private var reviewStepView: some View {
+        Form {
+            Section("识别结果") {
+                if let image = selectedImage {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+
+                Button("重新选择图片") {
+                    withAnimation {
+                        currentStep = .source
+                    }
+                }
+            }
+            basicSection
+            timeSection
+            seatSection
         }
     }
 
@@ -210,18 +347,70 @@ struct AddTicketView: View {
 
     private var basicSection: some View {
         Section("基础信息") {
-            TextField("车次", text: $trainNumber)
-                .textInputAutocapitalization(.characters)
-            TextField("出发站", text: $departureStation)
-            TextField("到达站", text: $arrivalStation)
-            TextField("票种", text: $ticketType)
-            HStack {
-                Text("票价")
-                Spacer()
-                TextField("0", value: $price, format: .number)
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("车次")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("G123", text: $trainNumber)
+                        .textInputAutocapitalization(.characters)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("票种")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("成人票", text: $ticketType)
+                }
             }
+
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("出发站")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("北京南", text: $departureStation)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("到达站")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("上海虹桥", text: $arrivalStation)
+                }
+            }
+
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("票价（元）")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("0", value: $price, format: .number)
+                        .keyboardType(.decimalPad)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("坐席")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Menu {
+                        ForEach(seatClassOptions, id: \.self) { item in
+                            Button(item) {
+                                seatClass = item
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(seatClass)
+                                .foregroundStyle(.primary)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }         
         }
     }
 
@@ -234,12 +423,6 @@ struct AddTicketView: View {
 
     private var seatSection: some View {
         Section("座位") {
-            Picker("坐席", selection: $seatClass) {
-                ForEach(seatClassOptions, id: \.self) { item in
-                    Text(item)
-                }
-            }
-
             if seatClass != "无座" {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("车厢 / 排位 / 席位")
@@ -275,27 +458,6 @@ struct AddTicketView: View {
                         .clipped()
                     }
                 }
-
-                HStack {
-                    Text("当前座位")
-                    Spacer()
-                    Text(formattedSeat)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private var rawTextSection: some View {
-        Section("OCR 原始文本") {
-            if rawLines.isEmpty {
-                Text("暂无")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(rawLines, id: \.self) { line in
-                    Text(line)
-                        .font(.footnote)
-                }
             }
         }
     }
@@ -315,19 +477,34 @@ struct AddTicketView: View {
         return carriageNumber + "车" + seatNumber
     }
 
+    private func beginRecognition() {
+        guard selectedImage != nil else { return }
+        withAnimation {
+            currentStep = .processing
+        }
+        Task {
+            await runOCR()
+        }
+    }
+
     private func loadSelectedPhoto(item: PhotosPickerItem?) async {
         guard let item else {
-            selectedImage = nil
-            originalImage = nil
-            detectedTicketRect = nil
+            await MainActor.run {
+                selectedImage = nil
+                originalImage = nil
+                detectedTicketRect = nil
+                progressMessage = "等待上传图片"
+            }
             return
         }
 
         do {
             guard let data = try await item.loadTransferable(type: Data.self),
                   let image = UIImage(data: data) else {
-                errorMessage = "图片读取失败"
-                showError = true
+                await MainActor.run {
+                    errorMessage = "图片读取失败"
+                    showError = true
+                }
                 return
             }
 
@@ -338,9 +515,23 @@ struct AddTicketView: View {
 
             await autoDetectAndPrepareTicketImage(from: image)
         } catch {
-            errorMessage = error.localizedDescription
-            showError = true
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                showError = true
+            }
         }
+    }
+
+    private func loadCapturedImage(_ image: UIImage?) async {
+        guard let image else { return }
+
+        await MainActor.run {
+            selectedPhotoItem = nil
+            originalImage = image
+            progressMessage = "正在自动框选车票"
+        }
+
+        await autoDetectAndPrepareTicketImage(from: image)
     }
 
     private func autoDetectAndPrepareTicketImage(from image: UIImage) async {
@@ -352,6 +543,9 @@ struct AddTicketView: View {
                 progressMessage = "未检测到车票边界，已使用整图（可直接识别）"
             } else {
                 progressMessage = "已自动框选车票，可直接识别"
+            }
+            withAnimation {
+                currentStep = .source
             }
         }
     }
@@ -430,30 +624,49 @@ struct AddTicketView: View {
 
     private func runOCR() async {
         guard let image = selectedImage else {
+            await MainActor.run {
+                withAnimation {
+                    currentStep = .source
+                }
+            }
             return
         }
 
-        isRecognizing = true
-        progressEvents.removeAll()
-        progressMessage = "正在识别"
+        await MainActor.run {
+            isRecognizing = true
+            progressEvents.removeAll()
+            progressMessage = "正在识别"
+        }
 
         do {
             let result = try await ocrUseCase.recognizeTicket(from: image, modelContext: modelContext) { progress in
                 Task { @MainActor in
-                    progressEvents.append(progress)
+                    withAnimation {
+                        progressEvents.append(progress)
+                    }
                     progressMessage = progress.message
                     applySnapshot(progress.snapshot)
                 }
             }
 
-            applySnapshot(result)
+            await MainActor.run {
+                applySnapshot(result)
+                isRecognizing = false
+                withAnimation {
+                    currentStep = .review
+                }
+            }
         } catch {
-            errorMessage = error.localizedDescription
-            showError = true
-            progressMessage = "识别失败"
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                showError = true
+                progressMessage = "识别失败"
+                isRecognizing = false
+                withAnimation {
+                    currentStep = .source
+                }
+            }
         }
-
-        isRecognizing = false
     }
 
     private func applySnapshot(_ snapshot: AddTicketOCRResult) {
@@ -615,6 +828,47 @@ private extension UIImage {
             cg.translateBy(x: targetSize.width / 2, y: targetSize.height / 2)
             cg.rotate(by: .pi / 2)
             draw(in: CGRect(x: -size.width / 2, y: -size.height / 2, width: size.width, height: size.height))
+        }
+    }
+}
+
+private struct CameraImagePicker: UIViewControllerRepresentable {
+    var onPicked: (UIImage?) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPicked: onPicked)
+    }
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        picker.allowsEditing = false
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {
+    }
+
+    final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+        private let onPicked: (UIImage?) -> Void
+
+        init(onPicked: @escaping (UIImage?) -> Void) {
+            self.onPicked = onPicked
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            onPicked(nil)
+            picker.dismiss(animated: true)
+        }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
+            let image = info[.originalImage] as? UIImage
+            onPicked(image)
+            picker.dismiss(animated: true)
         }
     }
 }

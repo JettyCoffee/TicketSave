@@ -3,21 +3,6 @@ import SwiftUI
 struct SettingsView: View {
     var body: some View {
         NavigationStack {
-            List {
-                Section("数据与统计") {
-                    NavigationLink {
-                        StatisticsView()
-                    } label: {
-                        Label("旅行统计", systemImage: "chart.bar.fill")
-                    }
-
-                    NavigationLink {
-                        JourneyMapView()
-                    } label: {
-                        Label("人生足迹", systemImage: "map.fill")
-                    }
-                }
-
                 Section("OCR 方案") {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("当前添加流程")
@@ -28,7 +13,6 @@ struct SettingsView: View {
                     }
                     .padding(.vertical, 4)
                 }
-            }
             .navigationTitle("我的")
         }
     }
