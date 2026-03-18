@@ -24,9 +24,6 @@ struct TicketCardView: View {
             // 主体内容
             VStack(spacing: 16) {
                 routeSection
-                if !compact {
-                    detailsSection
-                }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
@@ -37,6 +34,7 @@ struct TicketCardView: View {
 
             // 底部价格栏
             bottomBar
+            .padding(.bottom, 8)
         }
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -113,28 +111,6 @@ struct TicketCardView: View {
         }
     }
 
-    // MARK: - Details
-    private var detailsSection: some View {
-        HStack(spacing: 0) {
-            detailItem(icon: "carseat.right.fill", label: "座位", value: ticket.formattedSeat.isEmpty ? "-" : ticket.formattedSeat)
-            Spacer()
-            detailItem(icon: "ticket.fill", label: "坐席", value: ticket.seatClass)
-        }
-    }
-
-    private func detailItem(icon: String, label: String, value: String) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 12))
-                .foregroundStyle(.tertiary)
-            Text(label)
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-            Text(value)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.primary)
-        }
-    }
 
     // MARK: - Tear Line
     private var tearLine: some View {
@@ -170,23 +146,21 @@ struct TicketCardView: View {
     // MARK: - Bottom
     private var bottomBar: some View {
         HStack {
-            // 左下角：坐席 + 车厢座位
-            VStack(alignment: .leading, spacing: 2) {
-                Text(ticket.seatClass)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(ticket.seatClassColor)
-                if !ticket.formattedSeat.isEmpty {
-                    Text(ticket.formattedSeat)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Spacer()
-
             Text("¥\(ticket.price, specifier: "%.1f")")
-                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .font(.system(size: 18, weight: .bold, design: .rounded))
                 .foregroundStyle(ticket.seatClassColor)
+            
+            Spacer()
+            if !ticket.formattedSeat.isEmpty {
+                Text(ticket.formattedSeat)
+                    .font(.system(size: 14, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(ticket.seatClass)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundStyle(ticket.seatClassColor)
+
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
@@ -196,8 +170,7 @@ struct TicketCardView: View {
     private var trainIcon: String {
         let prefix = ticket.trainNumber.prefix(1).uppercased()
         switch prefix {
-        case "G", "C": return "bolt.fill"
-        case "D": return "tram.fill"
+        case "G", "C", "D": return "tram.fill"
         default: return "train.side.front.car"
         }
     }

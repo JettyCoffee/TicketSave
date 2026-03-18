@@ -117,27 +117,16 @@ struct AddTicketView: View {
                 }
             }
             .onChange(of: seatClass) { _, newClass in
-                if newClass == "无座" {
-                    seatNumber = ""
-                    carriageNumber = ""
-                    return
-                }
-
-                if carriageNumber.isEmpty {
-                    carriageNumber = "01"
-                }
-
-                let rows = rowOptions(for: newClass)
-                if !rows.contains(seatRow) {
-                    seatRow = rows.first ?? "01"
-                }
-
-                let letters = letterOptions(for: newClass)
-                if !letters.contains(seatLetter) {
-                    seatLetter = letters.first ?? "A"
-                }
-
-                syncSeatNumber()
+                let normalized = TicketSeatFormService.normalizeAfterSeatClassChange(
+                    seatClass: newClass,
+                    carriageNumber: carriageNumber,
+                    seatRow: seatRow,
+                    seatLetter: seatLetter
+                )
+                carriageNumber = normalized.carriageNumber
+                seatRow = normalized.seatRow
+                seatLetter = normalized.seatLetter
+                seatNumber = normalized.seatNumber
             }
             .onChange(of: seatRow) { _, _ in
                 syncSeatNumber()
@@ -394,7 +383,7 @@ struct AddTicketView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Menu {
-                        ForEach(seatClassOptions, id: \.self) { item in
+                        ForEach(TicketSeatFormService.seatClassOptions, id: \.self) { item in
                             Button(item) {
                                 seatClass = item
                             }
@@ -440,8 +429,8 @@ struct AddTicketView: View {
                         .clipped()
 
                         Picker("排位", selection: $seatRow) {
-                            ForEach(rowOptions(for: seatClass), id: \.self) { opt in
-                                Text(opt + (isSleeper(seatClass) ? "铺" : "排")).tag(opt)
+                            ForEach(TicketSeatFormService.rowOptions(for: seatClass), id: \.self) { opt in
+                                Text(opt + (TicketSeatFormService.isSleeper(seatClass) ? "铺" : "排")).tag(opt)
                             }
                         }
                         .pickerStyle(.wheel)
@@ -449,7 +438,7 @@ struct AddTicketView: View {
                         .clipped()
 
                         Picker("席位", selection: $seatLetter) {
-                            ForEach(letterOptions(for: seatClass), id: \.self) { opt in
+                            ForEach(TicketSeatFormService.letterOptions(for: seatClass), id: \.self) { opt in
                                 Text(opt).tag(opt)
                             }
                         }
@@ -466,10 +455,6 @@ struct AddTicketView: View {
         !trainNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         && !departureStation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         && !arrivalStation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var seatClassOptions: [String] {
-        ["商务座", "一等座", "二等座", "特等座", "硬卧", "软卧", "硬座", "软座", "无座"]
     }
 
     private var formattedSeat: String {
@@ -712,47 +697,17 @@ struct AddTicketView: View {
     }
 
     private func parseSeatNumber(_ value: String) {
-        let marker = Set(["A", "B", "C", "D", "F", "上", "中", "下"])
-        guard let last = value.last else { return }
-
-        let lastString = String(last)
-        if marker.contains(lastString) {
-            let rowPart = String(value.dropLast())
-            let parsed = String(format: "%02d", Int(rowPart) ?? 1)
-            seatRow = parsed
-            seatLetter = lastString
-        }
+        guard let parsed = TicketSeatFormService.parseSeatNumber(value) else { return }
+        seatRow = parsed.seatRow
+        seatLetter = parsed.seatLetter
     }
 
     private func syncSeatNumber() {
-        guard seatClass != "无座" else {
-            seatNumber = ""
-            return
-        }
-        seatNumber = seatRow + seatLetter
-    }
-
-    private func rowOptions(for seatClass: String) -> [String] {
-        switch seatClass {
-        case "商务座", "特等座": return (1...9).map { String(format: "%02d", $0) }
-        case "一等座": return (1...18).map { String(format: "%02d", $0) }
-        case "硬卧", "软卧", "动卧": return (1...12).map { String(format: "%02d", $0) }
-        default: return (1...20).map { String(format: "%02d", $0) }
-        }
-    }
-
-    private func letterOptions(for seatClass: String) -> [String] {
-        switch seatClass {
-        case "商务座", "特等座": return ["A", "C", "F"]
-        case "一等座": return ["A", "C", "D", "F"]
-        case "硬卧": return ["上", "中", "下"]
-        case "软卧", "动卧": return ["上", "下"]
-        default: return ["A", "B", "C", "D", "F"]
-        }
-    }
-
-    private func isSleeper(_ seatClass: String) -> Bool {
-        ["硬卧", "软卧", "动卧"].contains(seatClass)
+        seatNumber = TicketSeatFormService.syncSeatNumber(
+            seatClass: seatClass,
+            seatRow: seatRow,
+            seatLetter: seatLetter
+        )
     }
 
     private func icon(for stage: AddTicketOCRStage) -> String {
