@@ -65,7 +65,7 @@ enum TicketSeatFormService {
         switch seatClass {
         case "商务座", "特等座": return ["A", "C", "F"]
         case "一等座": return ["A", "C", "D", "F"]
-        case "硬卧": return ["上", "中", "下"]
+        case "二等卧", "硬卧": return ["上", "中", "下"]
         case "软卧", "动卧": return ["上", "下"]
         default: return ["A", "B", "C", "D", "F"]
         }

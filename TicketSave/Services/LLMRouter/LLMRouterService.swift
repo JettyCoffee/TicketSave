@@ -35,7 +35,7 @@ final class LLMRouterService: LLMRouterProtocol {
             "departureStation": "始发站",
             "trainNumber": "车次(如 G123)",
             "arrivalStation": "终点站",
-            "departureTime": "发车时间的ISO8601字符串(例如 2026-03-18T14:30:00Z)",
+            "departureTime": "发车时间字符串（中国本地时间，建议格式 026-03-18 14:30:00）",
             "carriageNumber": "车厢号(例如 05)",
             "seatNumber": "座位号(例如 06F)",
             "price": 票价(数字如 123.5),
@@ -132,6 +132,11 @@ final class LLMRouterService: LLMRouterProtocol {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty { return .distantPast }
 
+        // 车票时间是中国本地时间；先按本地“墙上时钟”解析，避免 LLM 误加 Z 导致 +8h 偏移。
+        if let localDate = parseAsShanghaiLocalTime(text) {
+            return localDate
+        }
+
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let date = iso.date(from: text) { return date }
@@ -150,6 +155,33 @@ final class LLMRouterService: LLMRouterProtocol {
 
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
         return formatter.date(from: text) ?? .distantPast
+    }
+
+    private func parseAsShanghaiLocalTime(_ text: String) -> Date? {
+        let normalized = text
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: "T", with: " ")
+
+        guard let range = normalized.range(
+            of: #"^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}(:\d{2})?"#,
+            options: .regularExpression
+        ) else {
+            return nil
+        }
+
+        let wallClock = String(normalized[range])
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+
+        if wallClock.count == 16 {
+            formatter.dateFormat = "yyyy-MM-dd HH:mm"
+            return formatter.date(from: wallClock)
+        }
+
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.date(from: wallClock)
     }
 
     private func parsePrice(_ value: Any?) -> Double {

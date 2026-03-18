@@ -60,7 +60,8 @@ final class TrainScheduleRepository {
             return nil
         }
 
-        let calendar = Calendar(identifier: .gregorian)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
         let dayStart = calendar.startOfDay(for: departureDateTime)
 
         var depDayShift = depStop.arriveDayDiff
