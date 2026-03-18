@@ -1,11 +1,10 @@
 import Foundation
 
-struct OCRTicketExtraction: Sendable {
+struct OCRTicketExtraction: Sendable, Codable {
     var departureStation: String = ""
     var trainNumber: String = ""
     var arrivalStation: String = ""
     var departureTime: Date = .distantPast
-    var carriageAndSeat: String = ""
     var carriageNumber: String = ""
     var seatNumber: String = ""
     var price: Double = 0
@@ -28,7 +27,6 @@ struct AddTicketOCRResult: Sendable {
     var arrivalTime: Date = .distantPast
     var carriageNumber: String = ""
     var seatNumber: String = ""
-    var carriageAndSeat: String = ""
     var price: Double = 0
     var ticketType: String = ""
     var seatClass: String = ""

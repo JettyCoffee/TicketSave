@@ -17,6 +17,7 @@ enum VisionTicketOCRError: LocalizedError {
 
 final class VisionTicketOCRService {
     private let ciContext = CIContext(options: nil)
+    private let llmRouter: LLMRouterProtocol = LLMRouterService()
 
     func recognize(from image: UIImage) async throws -> OCRTicketExtraction {
         guard let baseCG = image.cgImage else { throw VisionTicketOCRError.invalidImage }
@@ -28,26 +29,29 @@ final class VisionTicketOCRService {
         }
 
         let lines = deduplicate(lines: merged)
-        let rawTexts = lines.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
-        let effectiveTexts = truncateAfterReimbursementSection(rawTexts)
-        var result = OCRTicketExtraction()
-        result.rawLines = effectiveTexts
-
-        let parsedRoute = parseTrainAndStations(from: effectiveTexts)
-        result.trainNumber = parsedRoute.train
-        result.departureStation = parsedRoute.departure
-        result.arrivalStation = parsedRoute.arrival
-        result.departureTime = parseDepartureTime(from: effectiveTexts)
-
-        let seat = parseCarriageAndSeat(from: effectiveTexts)
-        result.carriageAndSeat = seat.display
-        result.carriageNumber = seat.carriage
-        result.seatNumber = seat.seat
-        result.price = parsePrice(from: effectiveTexts)
-        result.ticketType = parseTicketType(from: effectiveTexts)
-        result.seatClass = parseSeatClass(from: effectiveTexts)
-
-        return result
+        
+        let sortedLines = lines.sorted { line1, line2 in
+            let yDiff = abs(line1.box.midY - line2.box.midY)
+            let avgHeight = (line1.box.height + line2.box.height) / 2.0
+            if yDiff < avgHeight * 0.6 {
+                return line1.box.minX < line2.box.minX
+            }
+            return line1.box.midY > line2.box.midY
+        }
+        
+        let rawTexts = sortedLines.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let rawText = rawTexts.joined(separator: " ")
+        
+        var cutoutText = rawText
+        if let match = rawText.range(of: "(座|使用)", options: .regularExpression) {
+            let endIndex = match.upperBound
+            cutoutText = String(rawText[..<endIndex])
+        }
+        
+        var extraction = try await llmRouter.parseTicketInfo(from: cutoutText)
+        extraction.rawLines = rawTexts
+        
+        return extraction
     }
 
     private struct OCRLine {
@@ -109,7 +113,7 @@ final class VisionTicketOCRService {
         var best: [String: OCRLine] = [:]
 
         for line in lines {
-            let key = normalized(line.text)
+            let key = String(line.text.filter { !$0.isWhitespace }.lowercased())
             if key.isEmpty { continue }
             if let old = best[key] {
                 if line.confidence > old.confidence {
@@ -119,203 +123,6 @@ final class VisionTicketOCRService {
                 best[key] = line
             }
         }
-
-        return best.values.sorted { lhs, rhs in
-            let dy = abs(lhs.box.midY - rhs.box.midY)
-            if dy < 0.02 {
-                return lhs.box.minX < rhs.box.minX
-            }
-            return lhs.box.midY > rhs.box.midY
-        }
-    }
-
-    private func normalized(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: " ", with: "")
-            .replacingOccurrences(of: "　", with: "")
-            .replacingOccurrences(of: "\t", with: "")
-    }
-
-    private func firstMatch(_ pattern: String, in value: String) -> String? {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
-            return nil
-        }
-        let ns = value as NSString
-        let range = NSRange(location: 0, length: ns.length)
-        guard let match = regex.firstMatch(in: value, options: [], range: range) else { return nil }
-        return ns.substring(with: match.range)
-    }
-
-    private func isMaskedPassengerLine(_ line: String) -> Bool {
-        let text = normalized(line)
-        let digitCount = text.filter { $0.isNumber }.count
-        let maskCount = text.filter { $0 == "*" || $0 == "#" || $0 == "x" || $0 == "X" }.count
-        let hasChineseNameTail = text.range(of: #"[\u4e00-\u9fa5]{2,5}$"#, options: .regularExpression) != nil
-        return digitCount >= 10 && maskCount >= 2 && hasChineseNameTail
-    }
-
-    private func truncateAfterReimbursementSection(_ lines: [String]) -> [String] {
-        guard let markerIndex = lines.firstIndex(where: { normalized($0).contains("仅供报销使用") }) else {
-            return lines
-        }
-
-        var cutIndex = markerIndex
-        let searchEnd = min(lines.count - 1, markerIndex + 4)
-        if markerIndex < searchEnd {
-            for i in (markerIndex + 1)...searchEnd {
-                if isMaskedPassengerLine(lines[i]) {
-                    cutIndex = i
-                    break
-                }
-            }
-        }
-
-        return Array(lines.prefix(cutIndex + 1))
-    }
-
-    private func parseDepartureTime(from lines: [String]) -> Date {
-        let pattern = #"(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日\s*(\d{1,2}):(\d{2})"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return .distantPast }
-
-        for line in lines {
-            let text = normalized(line)
-            let ns = text as NSString
-            let range = NSRange(location: 0, length: ns.length)
-            guard let match = regex.firstMatch(in: text, options: [], range: range) else { continue }
-
-            let y = Int(ns.substring(with: match.range(at: 1))) ?? 0
-            let m = Int(ns.substring(with: match.range(at: 2))) ?? 0
-            let d = Int(ns.substring(with: match.range(at: 3))) ?? 0
-            let hh = Int(ns.substring(with: match.range(at: 4))) ?? 0
-            let mm = Int(ns.substring(with: match.range(at: 5))) ?? 0
-
-            var comps = DateComponents()
-            comps.year = y
-            comps.month = m
-            comps.day = d
-            comps.hour = hh
-            comps.minute = mm
-            comps.second = 0
-            comps.timeZone = TimeZone(identifier: "Asia/Shanghai")
-            return Calendar(identifier: .gregorian).date(from: comps) ?? .distantPast
-        }
-
-        return .distantPast
-    }
-
-    private func stationInText(_ value: String, preferLast: Bool) -> String {
-        let pattern = #"[\u4e00-\u9fa5]{2,10}站"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return "" }
-        let ns = value as NSString
-        let range = NSRange(location: 0, length: ns.length)
-        let matches = regex.matches(in: value, options: [], range: range)
-        if matches.isEmpty { return "" }
-        let idx = preferLast ? matches.count - 1 : 0
-        return ns.substring(with: matches[idx].range)
-    }
-
-    private func parseTrainAndStations(from lines: [String]) -> (train: String, departure: String, arrival: String) {
-        let trainPattern = #"[GDCZTKYLSP]\s*\d{1,4}(?!\d)"#
-        guard let regex = try? NSRegularExpression(pattern: trainPattern, options: [.caseInsensitive]) else {
-            return ("", "", "")
-        }
-
-        for (idx, line) in lines.enumerated() {
-            let text = normalized(line)
-                .replacingOccurrences(of: "|", with: "")
-                .replacingOccurrences(of: "I", with: "")
-                .replacingOccurrences(of: "i", with: "")
-            let ns = text as NSString
-            let range = NSRange(location: 0, length: ns.length)
-            guard let match = regex.firstMatch(in: text, options: [], range: range) else { continue }
-
-            let train = ns.substring(with: match.range).uppercased().replacingOccurrences(of: " ", with: "")
-            let left = ns.substring(with: NSRange(location: 0, length: match.range.location))
-            let rightStart = match.range.location + match.range.length
-            let right = rightStart < ns.length ? ns.substring(from: rightStart) : ""
-
-            var departure = stationInText(left, preferLast: true)
-            var arrival = stationInText(right, preferLast: false)
-
-            if departure.isEmpty, idx > 0 {
-                for i in stride(from: idx - 1, through: 0, by: -1) {
-                    let candidate = stationInText(normalized(lines[i]), preferLast: true)
-                    if !candidate.isEmpty {
-                        departure = candidate
-                        break
-                    }
-                }
-            }
-
-            if arrival.isEmpty, idx + 1 < lines.count {
-                for i in (idx + 1)..<lines.count {
-                    let candidate = stationInText(normalized(lines[i]), preferLast: false)
-                    if !candidate.isEmpty {
-                        arrival = candidate
-                        break
-                    }
-                }
-            }
-
-            if !train.isEmpty {
-                return (train, departure, arrival)
-            }
-        }
-
-        return ("", "", "")
-    }
-
-    private func parseCarriageAndSeat(from lines: [String]) -> (display: String, carriage: String, seat: String) {
-        let pattern = #"(\d{1,2})[车年](\d{1,3}[A-Za-z上下中])号?"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return ("", "", "") }
-
-        for line in lines {
-            let text = normalized(line)
-            let ns = text as NSString
-            let range = NSRange(location: 0, length: ns.length)
-            guard let match = regex.firstMatch(in: text, options: [], range: range) else { continue }
-
-            let carriage = ns.substring(with: match.range(at: 1))
-            let seat = ns.substring(with: match.range(at: 2)).uppercased()
-            let display = String(format: "%02d", Int(carriage) ?? 0) + "车" + seat + "号"
-            return (display, String(format: "%02d", Int(carriage) ?? 0), seat)
-        }
-
-        return ("", "", "")
-    }
-
-    private func parsePrice(from lines: [String]) -> Double {
-        for line in lines {
-            let text = normalized(line)
-            if let value = firstMatch(#"[¥￥]?\d+(?:\.\d{1,2})"#, in: text) {
-                let cleaned = value
-                    .replacingOccurrences(of: "¥", with: "")
-                    .replacingOccurrences(of: "￥", with: "")
-                if let amount = Double(cleaned), amount > 0 {
-                    return amount
-                }
-            }
-        }
-        return 0
-    }
-
-    private func parseSeatClass(from lines: [String]) -> String {
-        let classes = ["商务座", "特等座", "一等座", "二等座", "无座", "高级软卧", "软卧", "硬卧", "软座", "硬座"]
-        let normalizedLines = lines.map(normalized)
-        for cls in classes where normalizedLines.contains(where: { $0.contains(cls) }) {
-            return cls
-        }
-        return ""
-    }
-
-    private func parseTicketType(from lines: [String]) -> String {
-        let normalizedLines = lines.map(normalized)
-        if normalizedLines.contains(where: { $0.contains("学惠") || $0.contains("学生") }) {
-            return "学生票"
-        }
-        if normalizedLines.contains(where: { $0.contains("仅供报销使用") }) {
-            return "报销票"
-        }
-        return ""
+        return Array(best.values)
     }
 }

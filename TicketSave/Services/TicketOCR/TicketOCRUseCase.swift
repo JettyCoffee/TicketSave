@@ -14,7 +14,6 @@ final class TicketOCRUseCase {
         result.trainNumber = extraction.trainNumber
         result.arrivalStation = extraction.arrivalStation
         result.departureTime = extraction.departureTime
-        result.carriageAndSeat = extraction.carriageAndSeat
         result.carriageNumber = extraction.carriageNumber
         result.seatNumber = extraction.seatNumber
         result.price = extraction.price

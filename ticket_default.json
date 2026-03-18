@@ -26,7 +26,6 @@
 			"seat": {
 				"carriageNumber": "",
 				"seatNumber": "",
-				"carriageAndSeat": "",
 				"seatClass": ""
 			},
 			"fare": {
